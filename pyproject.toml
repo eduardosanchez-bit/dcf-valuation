@@ -4,8 +4,8 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "dcf-valuation"
-version = "0.1.0"
-description = "Modelo de valoración por DCF con análisis de sensibilidad y app en Streamlit"
+version = "0.2.0"
+description = "Discounted cash flow valuation model with sensitivity analysis and a Streamlit app"
 readme = "README.md"
 requires-python = ">=3.10"
 license = { text = "MIT" }

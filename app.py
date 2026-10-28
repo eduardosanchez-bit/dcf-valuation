@@ -1,6 +1,6 @@
-"""App Streamlit para el modelo DCF.
+"""Streamlit app for the DCF model.
 
-Ejecutar con:  streamlit run app.py
+Run with:  python -m streamlit run app.py
 """
 
 from __future__ import annotations
@@ -8,8 +8,6 @@ from __future__ import annotations
 import sys
 from pathlib import Path
 
-import plotly.express as px
-import plotly.graph_objects as go
 import streamlit as st
 
 sys.path.insert(0, str(Path(__file__).parent / "src"))
@@ -24,29 +22,58 @@ from dcf import (  # noqa: E402
     sensitivity_table,
     wacc as compute_wacc,
 )
+from dcf import charts  # noqa: E402
+from dcf.companies import BY_TICKER, COMPANIES  # noqa: E402
 from dcf.data import CompanySnapshot, fetch_company  # noqa: E402
 
-M = 1_000_000  # todas las cifras se muestran en millones
+M = 1_000_000  # figures are displayed in millions
+MANUAL = "Manual input"
+CUSTOM = "Other ticker…"
 
 st.set_page_config(page_title="DCF Valuation", page_icon="📈", layout="wide")
-st.title("📈 Valoración por DCF")
-st.caption("Modelo de descuento de flujos de caja libres. Herramienta educativa, no es asesoramiento financiero.")
 
-# ---------------------------------------------------------------- Datos
+
+@st.cache_data(ttl=3600, show_spinner="Fetching market data…")
+def load_company(ticker: str) -> CompanySnapshot:
+    return fetch_company(ticker)
+
+
+def plot(fig) -> None:
+    st.plotly_chart(fig, width="stretch", theme=None, config=charts.CONFIG)
+
+
+# ---------------------------------------------------------------- Company
 with st.sidebar:
-    st.header("1. Empresa")
-    ticker = st.text_input("Ticker", value="AAPL").strip().upper()
-    if st.button("Cargar datos de Yahoo Finance", width="stretch"):
-        try:
-            with st.spinner("Descargando datos..."):
-                st.session_state["snap"] = fetch_company(ticker)
-            st.success(f"Datos cargados: {st.session_state['snap'].name}")
-        except Exception as exc:  # noqa: BLE001
-            st.session_state.pop("snap", None)
-            st.error(f"No se pudieron cargar los datos ({exc}). Introduce los valores a mano.")
+    st.header("1. Company")
+    options = [MANUAL] + [c.ticker for c in COMPANIES] + [CUSTOM]
 
-snap: CompanySnapshot | None = st.session_state.get("snap")
+    def option_label(opt: str) -> str:
+        if opt in BY_TICKER:
+            return BY_TICKER[opt].label
+        return opt
+
+    choice = st.selectbox("Select a company", options, index=1, format_func=option_label)
+    if choice == CUSTOM:
+        ticker = st.text_input("Yahoo Finance ticker", placeholder="e.g. ADBE or BKT.MC").strip().upper()
+    elif choice == MANUAL:
+        ticker = ""
+    else:
+        ticker = choice
+
+snap: CompanySnapshot | None = None
+if ticker:
+    try:
+        snap = load_company(ticker)
+    except Exception as exc:  # noqa: BLE001
+        st.sidebar.warning(
+            f"Live data for {ticker} is unavailable right now (Yahoo Finance did not respond or the ticker is "
+            "invalid). Using manual inputs instead."
+        )
+        with st.sidebar.expander("Error details"):
+            st.code(str(exc)[:300])
+
 tag = snap.ticker if snap else "manual"
+currency = snap.currency if snap else "USD"
 
 d_rev = snap.revenue / M if snap else 10_000.0
 d_margin = snap.ebit_margin if snap else 0.20
@@ -60,47 +87,57 @@ d_shares = snap.shares / M if snap else 1_000.0
 d_beta = snap.beta if snap else 1.0
 d_price = snap.price if snap else 20.0
 
+
+def clamp(value: float, low: float, high: float) -> float:
+    return float(min(max(value, low), high))
+
+
 with st.sidebar:
-    st.header("2. Hipótesis operativas")
-    base_revenue = st.number_input("Ingresos último año (M)", min_value=1.0, value=float(d_rev), key=f"rev_{tag}")
-    years = st.slider("Años de proyección", 3, 10, 5)
-    g_start = st.slider("Crecimiento año 1 (%)", -10.0, 40.0, 8.0, 0.5) / 100
-    g_end = st.slider("Crecimiento último año (%)", -5.0, 20.0, 3.0, 0.5) / 100
-    ebit_margin = st.slider("Margen EBIT (%)", -10.0, 60.0, float(round(d_margin * 100, 1)), 0.5, key=f"m_{tag}") / 100
-    tax_rate = st.slider("Tasa impositiva (%)", 0.0, 40.0, float(round(d_tax * 100, 1)), 0.5, key=f"t_{tag}") / 100
-    da_pct = st.slider("D&A (% ingresos)", 0.0, 20.0, float(round(d_da * 100, 1)), 0.5, key=f"da_{tag}") / 100
-    capex_pct = st.slider("Capex (% ingresos)", 0.0, 30.0, float(round(d_capex * 100, 1)), 0.5, key=f"cx_{tag}") / 100
-    nwc_pct = st.slider("ΔNWC (% de Δ ingresos)", 0.0, 40.0, 10.0, 0.5) / 100
+    st.header("2. Operating assumptions")
+    base_revenue = st.number_input("Last year revenue (M)", min_value=1.0, value=float(d_rev), key=f"rev_{tag}")
+    years = st.slider("Projection years", 3, 10, 5)
+    g_start = st.slider("Year 1 growth (%)", -10.0, 40.0, 8.0, 0.5) / 100
+    g_end = st.slider("Final year growth (%)", -5.0, 20.0, 3.0, 0.5) / 100
+    ebit_margin = st.slider("EBIT margin (%)", -10.0, 60.0, clamp(round(d_margin * 100, 1), -10, 60), 0.5, key=f"m_{tag}") / 100
+    tax_rate = st.slider("Tax rate (%)", 0.0, 40.0, clamp(round(d_tax * 100, 1), 0, 40), 0.5, key=f"t_{tag}") / 100
+    da_pct = st.slider("D&A (% of revenue)", 0.0, 20.0, clamp(round(d_da * 100, 1), 0, 20), 0.5, key=f"da_{tag}") / 100
+    capex_pct = st.slider("Capex (% of revenue)", 0.0, 30.0, clamp(round(d_capex * 100, 1), 0, 30), 0.5, key=f"cx_{tag}") / 100
+    nwc_pct = st.slider("Δ NWC (% of Δ revenue)", 0.0, 40.0, 10.0, 0.5) / 100
 
-    st.header("3. Coste de capital")
-    rf = st.slider("Tasa libre de riesgo (%)", 0.0, 8.0, 4.0, 0.1) / 100
-    erp = st.slider("Prima de riesgo de mercado (%)", 2.0, 9.0, 5.0, 0.1) / 100
-    beta = st.slider("Beta", 0.2, 2.5, float(round(min(max(d_beta, 0.2), 2.5), 2)), 0.05, key=f"b_{tag}")
-    kd = st.slider("Coste de la deuda antes de impuestos (%)", 0.0, 12.0, 5.0, 0.1) / 100
+    st.header("3. Cost of capital")
+    rf = st.slider("Risk-free rate (%)", 0.0, 8.0, 4.0, 0.1) / 100
+    erp = st.slider("Equity risk premium (%)", 2.0, 9.0, 5.0, 0.1) / 100
+    beta = st.slider("Beta", 0.2, 2.5, clamp(round(d_beta, 2), 0.2, 2.5), 0.05, key=f"b_{tag}")
+    kd = st.slider("Pre-tax cost of debt (%)", 0.0, 12.0, 5.0, 0.1) / 100
 
-    st.header("4. Balance y mercado")
-    market_cap = st.number_input("Capitalización (M)", min_value=1.0, value=float(d_mcap), key=f"mc_{tag}")
-    debt = st.number_input("Deuda total (M)", min_value=0.0, value=float(d_debt), key=f"d_{tag}")
-    cash = st.number_input("Caja (M)", min_value=0.0, value=float(d_cash), key=f"c_{tag}")
-    shares = st.number_input("Acciones (M)", min_value=0.001, value=float(d_shares), key=f"s_{tag}")
-    price = st.number_input("Precio actual", min_value=0.01, value=float(d_price), key=f"p_{tag}")
+    st.header("4. Balance sheet & market")
+    market_cap = st.number_input("Market cap (M)", min_value=1.0, value=float(d_mcap), key=f"mc_{tag}")
+    debt = st.number_input("Total debt (M)", min_value=0.0, value=float(d_debt), key=f"d_{tag}")
+    cash = st.number_input("Cash (M)", min_value=0.0, value=float(d_cash), key=f"c_{tag}")
+    shares = st.number_input("Shares outstanding (M)", min_value=0.001, value=float(d_shares), key=f"s_{tag}")
+    price = st.number_input("Current share price", min_value=0.01, value=float(d_price), key=f"p_{tag}")
 
-    st.header("5. Valor terminal")
-    terminal_growth = st.slider("Crecimiento terminal (%)", 0.0, 5.0, 2.5, 0.1) / 100
-    use_multiple = st.checkbox("Usar múltiplo de salida EV/EBITDA")
-    exit_multiple = st.slider("Múltiplo EV/EBITDA", 3.0, 30.0, 12.0, 0.5) if use_multiple else None
-    mid_year = st.checkbox("Convención de mitad de año")
+    st.header("5. Terminal value")
+    terminal_growth = st.slider("Terminal growth (%)", 0.0, 5.0, 2.5, 0.1) / 100
+    use_multiple = st.checkbox("Use exit EV/EBITDA multiple")
+    exit_multiple = st.slider("EV/EBITDA multiple", 3.0, 30.0, 12.0, 0.5) if use_multiple else None
+    mid_year = st.checkbox("Mid-year discounting convention")
 
-# ---------------------------------------------------------------- Cálculo
+# ---------------------------------------------------------------- Calculation
 ke = capm_cost_of_equity(rf, beta, erp)
 wacc_calc = compute_wacc(market_cap, debt, ke, kd, tax_rate)
 
 with st.sidebar:
-    override = st.checkbox("Fijar WACC manualmente")
-    wacc_value = st.slider("WACC (%)", 3.0, 20.0, float(round(wacc_calc * 100, 2)), 0.1) / 100 if override else wacc_calc
+    override = st.checkbox("Set WACC manually")
+    wacc_value = (
+        st.slider("WACC (%)", 3.0, 20.0, clamp(round(wacc_calc * 100, 2), 3, 20), 0.1) / 100 if override else wacc_calc
+    )
+
+st.title("DCF Valuation")
+st.caption("Discounted free cash flow model. Educational tool, not financial advice.")
 
 if wacc_value <= terminal_growth and not use_multiple:
-    st.error("El WACC debe ser mayor que el crecimiento terminal. Ajusta las hipótesis.")
+    st.error("WACC must be greater than terminal growth. Adjust the assumptions.")
     st.stop()
 
 assumptions = Assumptions(
@@ -115,75 +152,93 @@ assumptions = Assumptions(
 net_debt = debt - cash
 result = run_dcf(assumptions, wacc_value, terminal_growth, net_debt, shares, exit_multiple, mid_year)
 
-# ---------------------------------------------------------------- Resultados
+# ---------------------------------------------------------------- Results
 if snap:
     st.subheader(f"{snap.name} ({snap.ticker})")
 
 c1, c2, c3, c4 = st.columns(4)
-c1.metric("Valor intrínseco por acción", f"{result.value_per_share:,.2f}")
-c2.metric("Precio de mercado", f"{price:,.2f}")
-c3.metric("Potencial", f"{result.upside(price):+.1%}")
-c4.metric("WACC", f"{result.wacc:.2%}", help=f"Coste del equity (CAPM): {ke:.2%} · Coste de deuda neto: {after_tax_cost_of_debt(kd, tax_rate):.2%}")
+c1.metric("Intrinsic value per share", f"{result.value_per_share:,.2f}")
+c2.metric("Market price", f"{price:,.2f}")
+c3.metric("Upside / downside", f"{result.upside(price):+.1%}")
+c4.metric(
+    "WACC",
+    f"{result.wacc:.2%}",
+    help=f"Cost of equity (CAPM): {ke:.2%} · After-tax cost of debt: {after_tax_cost_of_debt(kd, tax_rate):.2%}",
+)
 
 c5, c6, c7, c8 = st.columns(4)
-c5.metric("Valor de empresa (M)", f"{result.enterprise_value:,.0f}")
-c6.metric("Deuda neta (M)", f"{net_debt:,.0f}")
-c7.metric("Valor del equity (M)", f"{result.equity_value:,.0f}")
-c8.metric("Peso del valor terminal", f"{result.terminal_value_share:.0%}")
+c5.metric(f"Enterprise value ({currency} M)", f"{result.enterprise_value:,.0f}")
+c6.metric(f"Net debt ({currency} M)", f"{net_debt:,.0f}")
+c7.metric(f"Equity value ({currency} M)", f"{result.equity_value:,.0f}")
+c8.metric("Terminal value share", f"{result.terminal_value_share:.0%}")
 
+sector = (snap.sector if snap and snap.sector else BY_TICKER[ticker].sector if ticker in BY_TICKER else "").lower()
+if "financ" in sector:
+    st.info(
+        "Banks, insurers and other financial companies are poorly suited to an unlevered FCF model "
+        "(debt is part of their operations). Treat this result with caution."
+    )
 if result.terminal_value_share > 0.75:
-    st.warning("El valor terminal supone más del 75 % del valor de empresa: la valoración depende mucho de las hipótesis a largo plazo.")
+    st.warning("The terminal value is over 75% of enterprise value: the result depends heavily on long-term assumptions.")
 
-tab_proj, tab_sens, tab_scen = st.tabs(["Proyección", "Sensibilidad", "Escenarios"])
+tab_proj, tab_val, tab_sens, tab_scen = st.tabs(["Projection", "Valuation", "Sensitivity", "Scenarios"])
 
 with tab_proj:
-    proj = result.projections
-    fig = go.Figure()
-    fig.add_bar(x=proj.index, y=proj["fcf"], name="FCF")
-    fig.add_scatter(x=proj.index, y=proj["pv_fcf"], name="FCF descontado", mode="lines+markers")
-    fig.update_layout(xaxis_title="Año", yaxis_title="Millones", height=380, margin=dict(t=20))
-    st.plotly_chart(fig, width="stretch")
-    st.dataframe(
-        proj.rename(
-            columns={
-                "revenue": "Ingresos", "growth": "Crecimiento", "ebit": "EBIT", "nopat": "NOPAT",
-                "da": "D&A", "capex": "Capex", "delta_nwc": "ΔNWC", "fcf": "FCF",
-                "discount_factor": "Factor desc.", "pv_fcf": "VA del FCF",
-            }
-        ).style.format({"Crecimiento": "{:.1%}", "Factor desc.": "{:.4f}"}, precision=1),
-        width="stretch",
+    left, right = st.columns(2)
+    with left:
+        plot(charts.revenue_chart(result.projections, currency))
+    with right:
+        plot(charts.fcf_chart(result.projections, currency))
+    with st.expander("Projection table"):
+        st.dataframe(
+            result.projections.rename(
+                columns={
+                    "revenue": "Revenue",
+                    "growth": "Growth",
+                    "ebit": "EBIT",
+                    "nopat": "NOPAT",
+                    "da": "D&A",
+                    "capex": "Capex",
+                    "delta_nwc": "Δ NWC",
+                    "fcf": "FCF",
+                    "discount_factor": "Discount factor",
+                    "pv_fcf": "PV of FCF",
+                }
+            ).style.format({"Growth": "{:.1%}", "Discount factor": "{:.4f}"}, precision=1),
+            width="stretch",
+        )
+
+with tab_val:
+    plot(charts.ev_bridge(result, currency))
+    st.caption(
+        "Present value of projected cash flows plus present value of the terminal value gives enterprise value; "
+        "subtracting net debt gives equity value."
     )
 
 with tab_sens:
-    st.write("Valor por acción según WACC (filas) y crecimiento terminal (columnas).")
     waccs = [round(wacc_value + d, 4) for d in (-0.02, -0.01, 0.0, 0.01, 0.02)]
     growths = [round(terminal_growth + d, 4) for d in (-0.01, -0.005, 0.0, 0.005, 0.01)]
     table = sensitivity_table(assumptions, net_debt, shares, waccs, growths, mid_year)
-    heat = px.imshow(
-        table.values,
-        x=[f"{g:.1%}" for g in growths],
-        y=[f"{w:.1%}" for w in waccs],
-        text_auto=".2f",
-        color_continuous_scale="RdYlGn",
-        aspect="auto",
-        labels=dict(x="Crecimiento terminal", y="WACC", color="€/acción"),
+    plot(charts.sensitivity_heatmap(table, price, waccs[2], growths[2]))
+    st.caption(
+        f"Blue cells are valued above the current price ({price:,.2f}), red cells below. "
+        "The outlined cell is the base case."
     )
-    heat.update_layout(height=380, margin=dict(t=20))
-    st.plotly_chart(heat, width="stretch")
 
 with tab_scen:
-    st.write("Pesimista / base / optimista: ±2 pp de crecimiento anual y ±3 pp de margen EBIT.")
     scen = scenario_table(assumptions, net_debt, shares, wacc_value, terminal_growth)
+    plot(charts.scenario_chart(scen, price, currency))
+    st.caption("Pessimistic / optimistic: −/+ 2 pp annual revenue growth and −/+ 3 pp EBIT margin versus the base case.")
     st.dataframe(scen.style.format("{:,.2f}"), width="stretch")
 
-with st.expander("Metodología y limitaciones"):
+with st.expander("Methodology and limitations"):
     st.markdown(
         """
         - **FCFF** = EBIT·(1−t) + D&A − Capex − ΔNWC.
-        - **WACC** con CAPM para el coste del equity y ponderación a valores de mercado.
-        - **Valor terminal** por Gordon o por múltiplo de salida; se descuenta al final del último año.
-        - **Limitaciones**: hipótesis constantes de margen y reinversión, sin modelar estructura de capital
-          dinámica, arrendamientos, opciones sobre acciones ni activos no operativos.
-        - Los datos de Yahoo Finance pueden ser incompletos; revísalos antes de confiar en el resultado.
+        - **WACC** uses CAPM for the cost of equity, weighted at market values.
+        - **Terminal value** via Gordon growth or exit multiple, discounted from the end of the last projected year.
+        - **Limitations**: constant margins and reinvestment ratios, no dynamic capital structure, leases,
+          stock options or non-operating assets.
+        - Yahoo Finance data can be incomplete or delayed; review it before relying on the result.
         """
     )

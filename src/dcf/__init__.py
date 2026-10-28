@@ -1,4 +1,4 @@
-"""Modelo de valoración por descuento de flujos de caja (DCF)."""
+"""Discounted cash flow (DCF) valuation model."""
 
 from .projections import Assumptions, fade_growth, project_fcf
 from .sensitivity import scenario_table, sensitivity_table
@@ -20,4 +20,4 @@ __all__ = [
     "wacc",
 ]
 
-__version__ = "0.1.0"
+__version__ = "0.2.0"

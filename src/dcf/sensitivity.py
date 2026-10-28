@@ -1,4 +1,4 @@
-"""Análisis de sensibilidad y escenarios."""
+"""Sensitivity analysis and scenarios."""
 
 from __future__ import annotations
 
@@ -19,16 +19,16 @@ def sensitivity_table(
     growth_values: Iterable[float],
     mid_year: bool = False,
 ) -> pd.DataFrame:
-    """Valor por acción para combinaciones de WACC (filas) y crecimiento terminal (columnas).
+    """Value per share for WACC (rows) and terminal growth (columns) combinations.
 
-    Las combinaciones inválidas (WACC <= g) se devuelven como NaN.
+    Invalid combinations (WACC <= g) are returned as NaN.
     """
     wacc_values = list(wacc_values)
     growth_values = list(growth_values)
     table = pd.DataFrame(
         np.nan,
         index=pd.Index(wacc_values, name="WACC"),
-        columns=pd.Index(growth_values, name="Crecimiento terminal"),
+        columns=pd.Index(growth_values, name="Terminal growth"),
     )
     for w in wacc_values:
         for g in growth_values:
@@ -47,15 +47,15 @@ def scenario_table(
     growth_shift: float = 0.02,
     margin_shift: float = 0.03,
 ) -> pd.DataFrame:
-    """Compara escenarios pesimista / base / optimista.
+    """Compare pessimistic / base / optimistic scenarios.
 
-    El escenario optimista suma ``growth_shift`` al crecimiento de cada año y
-    ``margin_shift`` al margen EBIT; el pesimista los resta.
+    The optimistic case adds ``growth_shift`` to each year's growth and
+    ``margin_shift`` to the EBIT margin; the pessimistic case subtracts them.
     """
     scenarios = {
-        "Pesimista": (-growth_shift, -margin_shift),
+        "Pessimistic": (-growth_shift, -margin_shift),
         "Base": (0.0, 0.0),
-        "Optimista": (growth_shift, margin_shift),
+        "Optimistic": (growth_shift, margin_shift),
     }
     rows = []
     for name, (dg, dm) in scenarios.items():
@@ -66,10 +66,10 @@ def scenario_table(
         r = run_dcf(a, wacc, terminal_growth, net_debt, shares)
         rows.append(
             {
-                "Escenario": name,
-                "Valor empresa": r.enterprise_value,
-                "Valor equity": r.equity_value,
-                "Valor por acción": r.value_per_share,
+                "Scenario": name,
+                "Enterprise value": r.enterprise_value,
+                "Equity value": r.equity_value,
+                "Value per share": r.value_per_share,
             }
         )
-    return pd.DataFrame(rows).set_index("Escenario")
+    return pd.DataFrame(rows).set_index("Scenario")

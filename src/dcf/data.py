@@ -1,4 +1,4 @@
-"""Descarga de datos financieros con yfinance y estimación de hipótesis de partida."""
+"""Download financial data with yfinance and derive starting assumptions."""
 
 from __future__ import annotations
 
@@ -7,11 +7,12 @@ from dataclasses import dataclass
 
 @dataclass(frozen=True)
 class CompanySnapshot:
-    """Datos básicos de una empresa para alimentar el modelo."""
+    """Basic company data used to seed the model."""
 
     ticker: str
     name: str
     currency: str
+    sector: str
     price: float
     shares: float
     market_cap: float
@@ -30,7 +31,7 @@ class CompanySnapshot:
 
 
 def _first_value(df, labels):
-    """Primer valor disponible (último ejercicio) para alguna de las etiquetas dadas."""
+    """First available value (latest fiscal year) for any of the given row labels."""
     for label in labels:
         if label in df.index:
             series = df.loc[label].dropna()
@@ -40,12 +41,12 @@ def _first_value(df, labels):
 
 
 def fetch_company(ticker: str) -> CompanySnapshot:
-    """Descarga datos de Yahoo Finance y calcula ratios históricos del último ejercicio.
+    """Download data from Yahoo Finance and compute last-fiscal-year ratios.
 
     Raises:
-        RuntimeError: si no se pueden obtener los datos mínimos necesarios.
+        RuntimeError: if the minimum required data cannot be retrieved.
     """
-    import yfinance as yf  # import diferido: el resto del paquete no lo necesita
+    import yfinance as yf  # lazy import: the rest of the package does not need it
 
     t = yf.Ticker(ticker)
     info = t.info or {}
@@ -55,7 +56,7 @@ def fetch_company(ticker: str) -> CompanySnapshot:
     revenue = _first_value(income, ["Total Revenue", "Operating Revenue"])
     ebit = _first_value(income, ["EBIT", "Operating Income"])
     if not revenue or ebit is None:
-        raise RuntimeError(f"No se pudieron obtener ingresos/EBIT para '{ticker}'.")
+        raise RuntimeError(f"Could not retrieve revenue/EBIT for '{ticker}'.")
 
     pretax = _first_value(income, ["Pretax Income"])
     tax = _first_value(income, ["Tax Provision"])
@@ -68,12 +69,13 @@ def fetch_company(ticker: str) -> CompanySnapshot:
     price = info.get("currentPrice") or info.get("regularMarketPrice")
     shares = info.get("sharesOutstanding")
     if not price or not shares:
-        raise RuntimeError(f"No se pudo obtener precio/acciones para '{ticker}'.")
+        raise RuntimeError(f"Could not retrieve price/shares for '{ticker}'.")
 
     return CompanySnapshot(
         ticker=ticker.upper(),
         name=info.get("longName") or ticker.upper(),
         currency=info.get("currency", "USD"),
+        sector=info.get("sector") or "",
         price=float(price),
         shares=float(shares),
         market_cap=float(info.get("marketCap") or price * shares),

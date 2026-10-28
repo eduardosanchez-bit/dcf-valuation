@@ -1,4 +1,4 @@
-"""Valor terminal, valor de empresa y valor por acción."""
+"""Terminal value, enterprise value and value per share."""
 
 from __future__ import annotations
 
@@ -10,22 +10,22 @@ from .projections import Assumptions, project_fcf
 
 
 def terminal_value_gordon(last_fcf: float, wacc: float, terminal_growth: float) -> float:
-    """Valor terminal por crecimiento perpetuo (Gordon): FCF_N * (1+g) / (WACC - g)."""
+    """Terminal value via perpetual growth (Gordon): FCF_N * (1 + g) / (WACC - g)."""
     if wacc <= terminal_growth:
-        raise ValueError("El WACC debe ser mayor que el crecimiento terminal.")
+        raise ValueError("WACC must be greater than the terminal growth rate.")
     return last_fcf * (1 + terminal_growth) / (wacc - terminal_growth)
 
 
 def terminal_value_exit_multiple(last_metric: float, multiple: float) -> float:
-    """Valor terminal por múltiplo de salida (p. ej. EV/EBITDA * EBITDA del último año)."""
+    """Terminal value via exit multiple (e.g. final-year EBITDA * EV/EBITDA)."""
     if multiple <= 0:
-        raise ValueError("El múltiplo debe ser positivo.")
+        raise ValueError("The multiple must be positive.")
     return last_metric * multiple
 
 
 @dataclass(frozen=True)
 class DCFResult:
-    """Resultado de una valoración DCF."""
+    """Output of a DCF valuation."""
 
     projections: pd.DataFrame
     wacc: float
@@ -41,13 +41,13 @@ class DCFResult:
 
     @property
     def terminal_value_share(self) -> float:
-        """Peso del valor terminal sobre el valor de empresa."""
+        """Share of enterprise value coming from the terminal value."""
         return self.pv_terminal_value / self.enterprise_value if self.enterprise_value else float("nan")
 
     def upside(self, market_price: float) -> float:
-        """Potencial (+) o sobrevaloración (-) frente al precio de mercado."""
+        """Upside (+) or downside (-) versus the market price."""
         if market_price <= 0:
-            raise ValueError("market_price debe ser positivo.")
+            raise ValueError("market_price must be positive.")
         return self.value_per_share / market_price - 1
 
 
@@ -60,20 +60,20 @@ def run_dcf(
     exit_multiple: float | None = None,
     mid_year: bool = False,
 ) -> DCFResult:
-    """Ejecuta la valoración DCF completa.
+    """Run a full DCF valuation.
 
     Args:
-        assumptions: Hipótesis operativas.
-        wacc: Tasa de descuento.
-        terminal_growth: Crecimiento perpetuo (método Gordon).
-        net_debt: Deuda neta (deuda - caja). Negativa si hay caja neta.
-        shares: Número de acciones en circulación.
-        exit_multiple: Si se indica, el valor terminal usa EV/EBITDA de salida
-            en lugar de Gordon.
-        mid_year: Si es True, los flujos se descuentan a mitad de año.
+        assumptions: Operating assumptions.
+        wacc: Discount rate.
+        terminal_growth: Perpetual growth rate (Gordon method).
+        net_debt: Debt minus cash. Negative when the company has net cash.
+        shares: Shares outstanding.
+        exit_multiple: If given, the terminal value uses an exit EV/EBITDA
+            multiple instead of the Gordon growth formula.
+        mid_year: If True, cash flows are discounted at mid-year.
     """
     if shares <= 0:
-        raise ValueError("shares debe ser positivo.")
+        raise ValueError("shares must be positive.")
 
     proj = project_fcf(assumptions)
     years = proj.index.to_numpy()
@@ -91,7 +91,7 @@ def run_dcf(
         tv = terminal_value_gordon(float(last["fcf"]), wacc, terminal_growth)
         g_used = terminal_growth
 
-    # El valor terminal se descuenta al final del último año proyectado.
+    # The terminal value is discounted from the end of the last projected year.
     n = int(years[-1])
     pv_tv = tv / (1 + wacc) ** n
 

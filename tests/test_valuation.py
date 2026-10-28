@@ -88,7 +88,7 @@ def test_sensitivity_is_monotonic(five_year):
     waccs = [0.08, 0.09, 0.10, 0.11]
     growths = [0.01, 0.02, 0.03]
     t = sensitivity_table(five_year, 0, 100, waccs, growths)
-    # más WACC -> menos valor; más crecimiento -> más valor
+    # higher WACC -> lower value; higher growth -> higher value
     for g in growths:
         col = t[g].to_numpy()
         assert all(col[i] > col[i + 1] for i in range(len(col) - 1))
@@ -105,5 +105,5 @@ def test_sensitivity_marks_invalid_cells_as_nan(five_year):
 
 def test_scenarios_are_ordered(five_year):
     s = scenario_table(five_year, 0, 100, 0.10, 0.02)
-    v = s["Valor por acción"]
-    assert v["Pesimista"] < v["Base"] < v["Optimista"]
+    v = s["Value per share"]
+    assert v["Pessimistic"] < v["Base"] < v["Optimistic"]

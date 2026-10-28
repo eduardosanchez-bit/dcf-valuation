@@ -1,4 +1,4 @@
-"""Proyección de ingresos y flujo de caja libre (FCF) a la empresa."""
+"""Revenue and free cash flow (FCF) projections."""
 
 from __future__ import annotations
 
@@ -9,16 +9,16 @@ import pandas as pd
 
 @dataclass(frozen=True)
 class Assumptions:
-    """Hipótesis operativas del modelo. Los porcentajes se expresan en tanto por uno.
+    """Operating assumptions. Percentages are expressed as fractions (0.05 = 5%).
 
     Attributes:
-        base_revenue: Ingresos del último ejercicio real.
-        revenue_growth: Crecimiento anual de ingresos, uno por año proyectado.
-        ebit_margin: Margen EBIT sobre ingresos.
-        tax_rate: Tasa impositiva efectiva sobre el EBIT.
-        da_pct: Amortización y depreciación como % de ingresos.
-        capex_pct: Inversión en activos fijos (capex) como % de ingresos.
-        nwc_pct: Variación del capital circulante como % de la variación de ingresos.
+        base_revenue: Revenue of the last reported fiscal year.
+        revenue_growth: Annual revenue growth, one entry per projected year.
+        ebit_margin: EBIT margin on revenue.
+        tax_rate: Effective tax rate applied to EBIT.
+        da_pct: Depreciation and amortization as a share of revenue.
+        capex_pct: Capital expenditure as a share of revenue.
+        nwc_pct: Change in net working capital as a share of the change in revenue.
     """
 
     base_revenue: float
@@ -31,25 +31,25 @@ class Assumptions:
 
     def __post_init__(self) -> None:
         if self.base_revenue <= 0:
-            raise ValueError("base_revenue debe ser positivo.")
+            raise ValueError("base_revenue must be positive.")
         if not self.revenue_growth:
-            raise ValueError("revenue_growth no puede estar vacío.")
+            raise ValueError("revenue_growth cannot be empty.")
         if not 0 <= self.tax_rate < 1:
-            raise ValueError("tax_rate debe estar en [0, 1).")
+            raise ValueError("tax_rate must be in [0, 1).")
 
     @property
     def years(self) -> int:
         return len(self.revenue_growth)
 
     def with_changes(self, **kwargs) -> "Assumptions":
-        """Copia con campos modificados (útil para escenarios)."""
+        """Return a copy with some fields changed (handy for scenarios)."""
         return replace(self, **kwargs)
 
 
 def fade_growth(start: float, end: float, years: int) -> list[float]:
-    """Interpolación lineal del crecimiento desde ``start`` hasta ``end``."""
+    """Linearly interpolate growth from ``start`` to ``end`` over ``years`` years."""
     if years < 1:
-        raise ValueError("years debe ser >= 1.")
+        raise ValueError("years must be >= 1.")
     if years == 1:
         return [start]
     step = (end - start) / (years - 1)
@@ -57,9 +57,9 @@ def fade_growth(start: float, end: float, years: int) -> list[float]:
 
 
 def project_fcf(a: Assumptions) -> pd.DataFrame:
-    """Proyecta el FCF a la empresa (FCFF) año a año.
+    """Project unlevered free cash flow (FCFF) year by year.
 
-    FCFF = EBIT * (1 - t) + D&A - Capex - ΔNWC
+    FCFF = EBIT * (1 - t) + D&A - Capex - change in NWC
     """
     rows = []
     prev_revenue = a.base_revenue

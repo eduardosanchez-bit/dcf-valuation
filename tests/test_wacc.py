@@ -17,7 +17,7 @@ def test_after_tax_cost_of_debt_rejects_bad_tax():
 
 
 def test_wacc_weighted_average():
-    # 60% equity a 10%, 40% deuda a 5% con t=20% -> 0.06 + 0.016
+    # 60% equity at 10%, 40% debt at 5% with t=20% -> 0.06 + 0.016
     assert wacc(600, 400, 0.10, 0.05, 0.20) == pytest.approx(0.076)
 
 
